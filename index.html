@@ -1,83 +1,637 @@
+```html id="s8r3d9"
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安全本地 2FA 管理器</title>
-    <style>
-        body { font-family: sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; text-align: center; }
-        input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
-        #code { font-size: 3rem; font-weight: bold; color: #007bff; margin: 20px 0; letter-spacing: 5px; }
-        #timer { color: #666; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>安全本地 2FA 管理器</title>
+
+<style>
+body{
+    font-family:-apple-system,system-ui,sans-serif;
+    background:#f4f6f9;
+    margin:0;
+    padding:20px;
+    display:flex;
+    justify-content:center;
+}
+
+.container{
+    width:100%;
+    max-width:520px;
+    background:#fff;
+    border-radius:14px;
+    padding:24px;
+    box-shadow:0 6px 25px rgba(0,0,0,.08);
+}
+
+h2{
+    text-align:center;
+    margin-top:0;
+}
+
+.section{
+    background:#fafafa;
+    border:1px solid #eee;
+    border-radius:10px;
+    padding:15px;
+    margin-bottom:16px;
+}
+
+.section-title{
+    font-weight:bold;
+    margin-bottom:10px;
+}
+
+.form-group{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+input,textarea{
+    width:100%;
+    box-sizing:border-box;
+    padding:10px;
+    border-radius:8px;
+    border:1px solid #ddd;
+    font-size:14px;
+}
+
+button{
+    padding:10px 14px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    background:#007bff;
+    color:#fff;
+    font-weight:bold;
+}
+
+button:hover{
+    background:#0056b3;
+}
+
+.btn-del{
+    background:#dc3545;
+}
+
+.account{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:#fff;
+    border:1px solid #eee;
+    border-radius:10px;
+    padding:15px;
+    margin-bottom:10px;
+}
+
+.code{
+    font-size:30px;
+    font-family:monospace;
+    color:#28a745;
+    font-weight:bold;
+    letter-spacing:2px;
+}
+
+.name{
+    font-weight:bold;
+    color:#555;
+}
+
+.progress{
+    width:100%;
+    height:5px;
+    background:#ddd;
+    border-radius:3px;
+    overflow:hidden;
+    margin-top:10px;
+}
+
+.bar{
+    height:100%;
+    background:#28a745;
+    width:100%;
+}
+
+.small{
+    font-size:12px;
+    color:#777;
+}
+</style>
 </head>
+
 <body>
-    <h2>安全本地 2FA 管理器</h2>
-    <input type="text" id="secret" placeholder="请手动输入或粘贴 2FA 密钥 (Base32)">
-    <div id="code">000000</div>
-    <div id="timer">剩余时间: -- 秒</div>
 
-    <script>
-        // Base32 解码函数（纯原生）
-        function base32ToBuf(str) {
-            const b32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-            str = str.toUpperCase().replace(/=+$/, '');
-            const buf = new Uint8Array(Math.ceil(str.length * 5 / 8));
-            let bits = 0, value = 0, index = 0;
-            for (let i = 0; i < str.length; i++) {
-                const val = b32.indexOf(str[i]);
-                if (val === -1) continue;
-                value = (value << 5) | val;
-                bits += 5;
-                if (bits >= 8) {
-                    buf[index++] = (value >> (bits - 8)) & 255;
-                    bits -= 8;
-                }
-            }
-            return buf.subarray(0, index);
+<div class="container">
+
+<h2>🔐 安全本地 2FA 管理器</h2>
+
+<div class="section">
+<div class="section-title">主密码解锁</div>
+
+<div class="form-group">
+<input type="password" id="masterPwd" placeholder="输入主密码">
+<button onclick="unlock()">解锁</button>
+</div>
+
+<div class="small">
+首次使用会自动初始化保险库
+</div>
+</div>
+
+<div id="mainUI" style="display:none;">
+
+<div class="section">
+<div class="section-title">添加账号</div>
+
+<div class="form-group">
+<input id="accName" placeholder="账号名称">
+<input id="accSecret" placeholder="2FA Secret">
+<button onclick="addAccount()">添加</button>
+</div>
+</div>
+
+<div class="section">
+<div class="section-title">加密备份</div>
+
+<button onclick="exportBackup()">导出加密备份</button>
+<button onclick="importBackup()">导入加密备份</button>
+
+<textarea id="backupBox"
+placeholder="这里显示备份数据"></textarea>
+</div>
+
+<div class="progress">
+<div id="bar" class="bar"></div>
+</div>
+
+<div id="list"></div>
+
+</div>
+
+</div>
+
+<script>
+
+let localAccounts = [];
+let masterPassword = "";
+
+/* =========================
+   安全加密模块
+========================= */
+
+const SecureVault = {
+
+    async deriveKey(password,salt){
+
+        const enc = new TextEncoder();
+
+        const keyMaterial = await crypto.subtle.importKey(
+            "raw",
+            enc.encode(password),
+            {name:"PBKDF2"},
+            false,
+            ["deriveKey"]
+        );
+
+        return crypto.subtle.deriveKey(
+            {
+                name:"PBKDF2",
+                salt:salt,
+                iterations:250000,
+                hash:"SHA-256"
+            },
+            keyMaterial,
+            {
+                name:"AES-GCM",
+                length:256
+            },
+            false,
+            ["encrypt","decrypt"]
+        );
+    },
+
+    async encrypt(data,password){
+
+        const enc = new TextEncoder();
+
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+
+        const key = await this.deriveKey(password,salt);
+
+        const encrypted = await crypto.subtle.encrypt(
+            {
+                name:"AES-GCM",
+                iv:iv
+            },
+            key,
+            enc.encode(JSON.stringify(data))
+        );
+
+        return {
+            salt:Array.from(salt),
+            iv:Array.from(iv),
+            data:Array.from(new Uint8Array(encrypted))
+        };
+    },
+
+    async decrypt(payload,password){
+
+        const dec = new TextDecoder();
+
+        const salt = new Uint8Array(payload.salt);
+        const iv = new Uint8Array(payload.iv);
+        const data = new Uint8Array(payload.data);
+
+        const key = await this.deriveKey(password,salt);
+
+        const decrypted = await crypto.subtle.decrypt(
+            {
+                name:"AES-GCM",
+                iv:iv
+            },
+            key,
+            data
+        );
+
+        return JSON.parse(dec.decode(decrypted));
+    }
+};
+
+/* =========================
+   Base32 + TOTP
+========================= */
+
+const TOTP = {
+
+    base32ToBytes(str){
+
+        let cleaned = str
+            .replace(/\s+/g,'')
+            .replace(/1/g,'I')
+            .replace(/0/g,'O')
+            .replace(/8/g,'B')
+            .toUpperCase();
+
+        const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+        let bits = "";
+
+        for(let c of cleaned){
+
+            let val = alphabet.indexOf(c);
+
+            if(val === -1) continue;
+
+            bits += val.toString(2).padStart(5,'0');
         }
 
-        // Web Crypto API 计算 TOTP
-        async function generateTOTP() {
-            const secretInput = document.getElementById('secret').value.trim();
-            if (!secretInput) return;
+        let bytes = [];
 
-            try {
-                const epoch = Math.floor(Date.now() / 1000);
-                const time = BigInt(Math.floor(epoch / 30));
-                const remain = 30 - (epoch % 30);
-                document.getElementById('timer').innerText = `剩余时间: ${remain} 秒`;
+        for(let i=0;i+8<=bits.length;i+=8){
 
-                const keyBuf = base32ToBuf(secretInput);
-                const msgBuf = new Uint8Array(8);
-                let tempTime = time;
-                for (let i = 7; i >= 0; i--) {
-                    msgBuf[i] = Number(tempTime & 255n);
-                    tempTime >>= 8n;
-                }
-
-                const cryptoKey = await crypto.subtle.importKey(
-                    "raw", keyBuf, { name: "HMAC", hash: { name: "SHA-1" } }, false, ["sign"]
-                );
-                const hmac = await crypto.subtle.sign("HMAC", cryptoKey, msgBuf);
-                const hmacBuf = new Uint8Array(hmac);
-                
-                const offset = hmacBuf[hmacBuf.length - 1] & 0xf;
-                const code = ((hmacBuf[offset] & 0x7f) << 24) |
-                             ((hmacBuf[offset + 1] & 0xff) << 16) |
-                             ((hmacBuf[offset + 2] & 0xff) << 8) |
-                             (hmacBuf[offset + 3] & 0xff);
-                             
-                const totp = (code % 1000000).toString().padStart(6, '0');
-                document.getElementById('code').innerText = totp;
-            } catch (e) {
-                document.getElementById('code').innerText = "密钥错误";
-            }
+            bytes.push(parseInt(bits.substr(i,8),2));
         }
 
-        // 每秒刷新一次
-        setInterval(generateTOTP, 1000);
-        document.getElementById('secret').addEventListener('input', generateTOTP);
-    </script>
+        return new Uint8Array(bytes);
+    },
+
+    async generate(secret){
+
+        try{
+
+            const secretBytes = this.base32ToBytes(secret);
+
+            const epoch = Math.floor(Date.now()/1000);
+
+            const time = Math.floor(epoch/30);
+
+            const buf = new ArrayBuffer(8);
+
+            const view = new DataView(buf);
+
+            view.setUint32(4,time & 0xffffffff);
+            view.setUint32(0,Math.floor(time / 0x100000000));
+
+            const cryptoKey = await crypto.subtle.importKey(
+                "raw",
+                secretBytes,
+                {
+                    name:"HMAC",
+                    hash:"SHA-1"
+                },
+                false,
+                ["sign"]
+            );
+
+            const hmac = await crypto.subtle.sign(
+                "HMAC",
+                cryptoKey,
+                buf
+            );
+
+            const bytes = new Uint8Array(hmac);
+
+            const offset = bytes[bytes.length-1] & 0xf;
+
+            const binary =
+                ((bytes[offset] & 0x7f) << 24) |
+                ((bytes[offset+1] & 0xff) << 16) |
+                ((bytes[offset+2] & 0xff) << 8) |
+                (bytes[offset+3] & 0xff);
+
+            return (binary % 1000000)
+                .toString()
+                .padStart(6,'0');
+
+        }catch(e){
+
+            return "ERROR";
+        }
+    }
+};
+
+/* =========================
+   数据存储
+========================= */
+
+async function saveVault(){
+
+    const encrypted = await SecureVault.encrypt(
+        localAccounts,
+        masterPassword
+    );
+
+    localStorage.setItem(
+        "secure_2fa_vault",
+        JSON.stringify(encrypted)
+    );
+}
+
+/* =========================
+   解锁
+========================= */
+
+async function unlock(){
+
+    const pwd = document
+        .getElementById("masterPwd")
+        .value;
+
+    if(!pwd){
+
+        alert("请输入主密码");
+        return;
+    }
+
+    masterPassword = pwd;
+
+    const raw = localStorage.getItem(
+        "secure_2fa_vault"
+    );
+
+    if(!raw){
+
+        localAccounts = [];
+
+        await saveVault();
+
+        alert("首次初始化成功");
+
+    }else{
+
+        try{
+
+            localAccounts = await SecureVault.decrypt(
+                JSON.parse(raw),
+                pwd
+            );
+
+            alert("解锁成功");
+
+        }catch(e){
+
+            alert("密码错误");
+
+            return;
+        }
+    }
+
+    document.getElementById("mainUI")
+        .style.display = "block";
+
+    render();
+
+    updateCodes();
+}
+
+/* =========================
+   添加账号
+========================= */
+
+async function addAccount(){
+
+    const name = document
+        .getElementById("accName")
+        .value
+        .trim();
+
+    const secret = document
+        .getElementById("accSecret")
+        .value
+        .trim();
+
+    if(!name || !secret){
+
+        alert("不能为空");
+        return;
+    }
+
+    localAccounts.push({
+        id:Date.now(),
+        name,
+        secret
+    });
+
+    await saveVault();
+
+    document.getElementById("accName").value="";
+    document.getElementById("accSecret").value="";
+
+    render();
+
+    updateCodes();
+}
+
+/* =========================
+   删除
+========================= */
+
+async function del(id){
+
+    if(!confirm("确定删除？")) return;
+
+    localAccounts = localAccounts.filter(
+        x => x.id !== id
+    );
+
+    await saveVault();
+
+    render();
+}
+
+/* =========================
+   渲染
+========================= */
+
+function render(){
+
+    const list = document.getElementById("list");
+
+    if(localAccounts.length === 0){
+
+        list.innerHTML = `
+        <div class="small">
+        暂无账号
+        </div>
+        `;
+
+        return;
+    }
+
+    let html = "";
+
+    for(let acc of localAccounts){
+
+        html += `
+        <div class="account">
+
+            <div>
+                <div class="name">
+                    ${escapeHtml(acc.name)}
+                </div>
+
+                <div class="code"
+                id="code-${acc.id}">
+                    ------
+                </div>
+            </div>
+
+            <button class="btn-del"
+            onclick="del(${acc.id})">
+                删除
+            </button>
+
+        </div>
+        `;
+    }
+
+    list.innerHTML = html;
+}
+
+/* =========================
+   更新验证码
+========================= */
+
+async function updateCodes(){
+
+    const epoch = Math.floor(Date.now()/1000);
+
+    const remain = 30 - (epoch % 30);
+
+    document.getElementById("bar")
+        .style.width =
+        ((remain/30)*100) + "%";
+
+    for(let acc of localAccounts){
+
+        const el = document.getElementById(
+            `code-${acc.id}`
+        );
+
+        if(el){
+
+            el.innerText =
+                await TOTP.generate(acc.secret);
+        }
+    }
+}
+
+setInterval(updateCodes,1000);
+
+/* =========================
+   备份
+========================= */
+
+function exportBackup(){
+
+    const raw = localStorage.getItem(
+        "secure_2fa_vault"
+    );
+
+    document.getElementById("backupBox")
+        .value = raw || "";
+}
+
+async function importBackup(){
+
+    const txt = document
+        .getElementById("backupBox")
+        .value
+        .trim();
+
+    if(!txt){
+
+        alert("请粘贴备份");
+        return;
+    }
+
+    try{
+
+        JSON.parse(txt);
+
+        localStorage.setItem(
+            "secure_2fa_vault",
+            txt
+        );
+
+        alert("恢复成功");
+
+        location.reload();
+
+    }catch(e){
+
+        alert("无效备份");
+    }
+}
+
+/* =========================
+   安全
+========================= */
+
+function escapeHtml(text){
+
+    return text
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;");
+}
+
+/* =========================
+   自动锁定
+========================= */
+
+window.addEventListener("beforeunload",()=>{
+
+    localAccounts = [];
+    masterPassword = "";
+});
+
+</script>
+
 </body>
 </html>
+```
