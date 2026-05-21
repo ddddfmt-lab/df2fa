@@ -1,263 +1,83 @@
-<html lang="zh-CN"><head>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>安全本地 2FA 管理器 (纯原生零依赖版)</title>
+    <title>安全本地 2FA 管理器</title>
     <style>
-        body { font-family: -apple-system, system-ui, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 500px; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); width: 100%; }
-        h2 { text-align: center; color: #333; margin-top: 0; }
-        .section { background: #fafafa; border: 1px solid #eee; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-        .section-title { font-weight: bold; margin-bottom: 10px; color: #444; font-size: 14px; }
-        .form-group { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 5px; }
-        input { flex: 1; min-width: 130px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
-        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; }
-        button:hover { background: #0056b3; }
-        button.btn-del { background: #dc3545; padding: 6px 10px; font-size: 12px; }
-        button.btn-secondary { background: #6c757d; }
-        button.btn-secondary:hover { background: #5a6268; }
-        .account-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; background: #fff; border-radius: 6px; margin-bottom: 10px; }
-        .account-name { font-weight: bold; color: #555; font-size: 14px; }
-        .account-code { font-size: 28px; font-weight: bold; color: #28a745; font-family: monospace; letter-spacing: 2px; margin-top: 5px; }
-        .timer-bar-container { width: 100%; background: #e9ecef; height: 4px; border-radius: 2px; margin-top: 15px; overflow: hidden; display: none; }
-        .timer-bar { background: #28a745; height: 100%; width: 100%; transition: width 1s linear; }
-        .error { color: #dc3545; font-size: 13px; margin-top: 8px; text-align: center; font-weight: bold; }
-        .success { color: #28a745; font-size: 13px; margin-top: 8px; text-align: center; }
-        textarea { width: 100%; height: 60px; margin-top: 10px; box-sizing: border-box; padding: 8px; border-radius: 6px; border: 1px solid #ddd; font-family: monospace; font-size: 12px; }
+        body { font-family: sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; text-align: center; }
+        input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
+        #code { font-size: 3rem; font-weight: bold; color: #007bff; margin: 20px 0; letter-spacing: 5px; }
+        #timer { color: #666; }
     </style>
 </head>
 <body>
+    <h2>安全本地 2FA 管理器</h2>
+    <input type="text" id="secret" placeholder="请手动输入或粘贴 2FA 密钥 (Base32)">
+    <div id="code">000000</div>
+    <div id="timer">剩余时间: -- 秒</div>
 
-<div class="container">
-    <h2>🔒 安全 2FA 管理器 (原生免网版)</h2>
-    
-    <!-- 第一步：解锁（由于不引入外部加密库，此版本使用明文存储或简单混淆，建议物理保存在安全电脑上） -->
-    <div class="section">
-        <div class="section-title">🔑 首次使用直接点击初始化，后续点击载入</div>
-        <div class="form-group">
-            <button onclick="unlockAndLoad()" style="width:100%;">⚡ 初始化并载入本地账号</button>
-        </div>
-        <div id="statusMsg" class="success">🔓 成功载入本地已存账号！</div>
-    </div>
-
-    <!-- 主操作区 -->
-    <div id="mainContent" style="display: block;">
-        <!-- 添加账号 -->
-        <div class="section">
-            <div class="section-title">➕ 添加新 2FA 账号</div>
-            <div class="form-group">
-                <input type="text" id="accName" placeholder="账号名称 (如: Proton)" autocomplete="off">
-                <input type="text" id="accSecret" placeholder="密钥 (直接粘贴带1的原串)" autocomplete="off">
-                <button onclick="addAccount()">安全添加</button>
-            </div>
-        </div>
-
-        <!-- 备份面板 -->
-        <div class="section">
-            <div class="section-title">📦 数据备份与迁移 (纯明文JSON串，请妥善保存)</div>
-            <div class="form-group">
-                <button class="btn-secondary" onclick="exportData()">生成备份文本</button>
-                <button class="btn-secondary" onclick="importData()">从文本恢复数据</button>
-            </div>
-            <textarea id="cryptoTextArea" placeholder="备份或恢复时的数据将显示在这里..." readonly=""></textarea>
-        </div>
-
-        <!-- 30秒更新进度条 -->
-        <div class="timer-bar-container" id="progressContainer" style="display: block;">
-            <div id="progressBar" class="timer-bar" style="width: 36.6667%;"></div>
-        </div>
-
-        <!-- 验证码列表 -->
-        <div id="listContainer" style="margin-top: 15px;"><div class="account-item"><div><div class="account-name">pm7</div><div class="account-code" id="code-1779350498253">929785</div></div><button class="btn-del" onclick="deleteAccount(1779350498253)">删除</button></div><div class="account-item"><div><div class="account-name">g7</div><div class="account-code" id="code-1779362616099">404381</div></div><button class="btn-del" onclick="deleteAccount(1779362616099)">删除</button></div></div>
-    </div>
-</div>
-
-<script>
-    let localAccounts = []; 
-
-    // ======= 💡 终极底层：用浏览器原生支持的 Web Crypto API 纯手工打造 TOTP 与 HMAC 算法 =======
-    const Base32TOTP = {
-        // 智能清洗算法：完美兼容 Proton 复制出来的数字 1 和 0
-        base32ToBytes: function(str) {
-            let cleaned = str.replace(/\s+/g, '')
-                             .replace(/1/g, 'I')
-                             .replace(/0/g, 'O')
-                             .replace(/8/g, 'B')
-                             .toUpperCase();
-            
-            const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-            let bits = "";
-            for (let i = 0; i < cleaned.length; i++) {
-                let val = alphabet.indexOf(cleaned[i]);
-                if (val === -1) continue; // 过滤杂质字符
-                bits += val.toString(2).padStart(5, '0');
+    <script>
+        // Base32 解码函数（纯原生）
+        function base32ToBuf(str) {
+            const b32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+            str = str.toUpperCase().replace(/=+$/, '');
+            const buf = new Uint8Array(Math.ceil(str.length * 5 / 8));
+            let bits = 0, value = 0, index = 0;
+            for (let i = 0; i < str.length; i++) {
+                const val = b32.indexOf(str[i]);
+                if (val === -1) continue;
+                value = (value << 5) | val;
+                bits += 5;
+                if (bits >= 8) {
+                    buf[index++] = (value >> (bits - 8)) & 255;
+                    bits -= 8;
+                }
             }
-            let bytes = [];
-            for (let i = 0; i + 8 <= bits.length; i += 8) {
-                bytes.push(parseInt(bits.substr(i, 8), 2));
-            }
-            return new Uint8Array(bytes);
-        },
+            return buf.subarray(0, index);
+        }
 
-        // 使用浏览器原生自带的 window.crypto 硬件级计算，100%不需要外界下载任何JS文件
-        getOTP: async function(secretStr) {
+        // Web Crypto API 计算 TOTP
+        async function generateTOTP() {
+            const secretInput = document.getElementById('secret').value.trim();
+            if (!secretInput) return;
+
             try {
-                const secretBytes = this.base32ToBytes(secretStr);
-                if (secretBytes.length === 0) return "ERR!";
-                
-                const epoch = Math.floor(new Date().getTime() / 1000);
-                const time = Math.floor(epoch / 30);
-                
-                // 构建时间戳的 8 字节 Buffer
-                const timeBytes = new ArrayBuffer(8);
-                const view = new DataView(timeBytes);
-                // JavaScript 整数只有 32 位，通过两段位移组合成 64 位大端序
-                view.setUint32(4, time & 0xffffffff);
-                view.setUint32(0, Math.floor(time / 0x100000000));
+                const epoch = Math.floor(Date.now() / 1000);
+                const time = BigInt(Math.floor(epoch / 30));
+                const remain = 30 - (epoch % 30);
+                document.getElementById('timer').innerText = `剩余时间: ${remain} 秒`;
 
-                // 核心：调用苹果/安卓/电脑浏览器底层原生自带的 WebCrypto 散列引擎
-                const cryptoKey = await window.crypto.subtle.importKey(
-                    "raw", secretBytes,
-                    { name: "HMAC", hash: { name: "SHA-1" } },
-                    false, ["sign"]
+                const keyBuf = base32ToBuf(secretInput);
+                const msgBuf = new Uint8Array(8);
+                let tempTime = time;
+                for (let i = 7; i >= 0; i--) {
+                    msgBuf[i] = Number(tempTime & 255n);
+                    tempTime >>= 8n;
+                }
+
+                const cryptoKey = await crypto.subtle.importKey(
+                    "raw", keyBuf, { name: "HMAC", hash: { name: "SHA-1" } }, false, ["sign"]
                 );
+                const hmac = await crypto.subtle.sign("HMAC", cryptoKey, msgBuf);
+                const hmacBuf = new Uint8Array(hmac);
                 
-                const hmacResult = await window.crypto.subtle.sign("HMAC", cryptoKey, timeBytes);
-                const hmacBytes = new Uint8Array(hmacResult);
-
-                const offset = hmacBytes[hmacBytes.length - 1] & 0xf;
-                const binary = ((hmacBytes[offset] & 0x7f) << 24) |
-                               ((hmacBytes[offset + 1] & 0xff) << 16) |
-                               ((hmacBytes[offset + 2] & 0xff) << 8) |
-                               (hmacBytes[offset + 3] & 0xff);
-
-                let otp = (binary % 1000000).toString();
-                return otp.padStart(6, '0');
+                const offset = hmacBuf[hmacBuf.length - 1] & 0xf;
+                const code = ((hmacBuf[offset] & 0x7f) << 24) |
+                             ((hmacBuf[offset + 1] & 0xff) << 16) |
+                             ((hmacBuf[offset + 2] & 0xff) << 8) |
+                             (hmacBuf[offset + 3] & 0xff);
+                             
+                const totp = (code % 1000000).toString().padStart(6, '0');
+                document.getElementById('code').innerText = totp;
             } catch (e) {
-                console.error(e);
-                return "ERR!";
+                document.getElementById('code').innerText = "密钥错误";
             }
         }
-    };
 
-    // ======= 界面业务逻辑逻辑控制 =======
-    function unlockAndLoad() {
-        const storedData = localStorage.getItem('native_2fa_data');
-        if (!storedData) {
-            localAccounts = [];
-            showMsg("statusMsg", "🎉 初始化成功！已开启本地沙盒环境。", false);
-        } else {
-            try {
-                localAccounts = JSON.parse(storedData);
-                showMsg("statusMsg", "🔓 成功载入本地已存账号！", false);
-            } catch(e) {
-                showMsg("statusMsg", "数据损坏，请尝试重新导入！", true);
-                localAccounts = [];
-            }
-        }
-        document.getElementById('mainContent').style.display = 'block';
-        document.getElementById('progressContainer').style.display = 'block';
-        renderList();
-        updateCodes();
-    }
-
-    function exportData() {
-        const storedData = localStorage.getItem('native_2fa_data');
-        const tx = document.getElementById('cryptoTextArea');
-        if (storedData) {
-            tx.value = storedData;
-            tx.removeAttribute('readonly');
-            tx.select();
-            showMsg("statusMsg", "✅ 数据文本已生成，请复制并存至您的记事本文件中！", false);
-        } else {
-            alert("当前没有任何已保存的数据！");
-        }
-    }
-
-    function importData() {
-        const tx = document.getElementById('cryptoTextArea');
-        const textData = tx.value.trim();
-        if (!textData) { alert("请先粘贴您之前备份的文本数据！"); return; }
-        if (confirm("导入新数据将会完全覆盖当前浏览器的数据，确定吗？")) {
-            try {
-                JSON.parse(textData); // 测试格式是否为合法JSON
-                localStorage.setItem('native_2fa_data', textData);
-                alert("恢复数据成功！");
-                location.reload();
-            } catch(e) {
-                alert("无效的数据格式，无法恢复！");
-            }
-        }
-    }
-
-    function saveToLocalStorage() {
-        localStorage.setItem('native_2fa_data', JSON.stringify(localAccounts));
-    }
-
-    function addAccount() {
-        const nameInput = document.getElementById('accName');
-        const secretInput = document.getElementById('accSecret');
-        let name = nameInput.value.trim();
-        let secret = secretInput.value.trim();
-
-        if (!name || !secret) { alert("内容不能为空！"); return; }
-
-        localAccounts.push({ id: Date.now(), name: name, secret: secret });
-        saveToLocalStorage();
-        
-        nameInput.value = ""; 
-        secretInput.value = "";
-        renderList(); 
-        updateCodes();
-    }
-
-    function deleteAccount(id) {
-        if (confirm("确定删除吗？请确保您已做好备份！")) {
-            localAccounts = localAccounts.filter(acc => acc.id !== id);
-            saveToLocalStorage(); 
-            renderList();
-        }
-    }
-
-    function renderList() {
-        const container = document.getElementById('listContainer');
-        if (localAccounts.length === 0) {
-            container.innerHTML = '<div style="text-align:center;color:#999;font-size:14px;padding:20px;">暂无账号，请在上方添加</div>';
-            return;
-        }
-        let html = '';
-        localAccounts.forEach(acc => {
-            html += `<div class="account-item"><div><div class="account-name">${escapeHtml(acc.name)}</div><div class="account-code" id="code-${acc.id}">------</div></div><button class="btn-del" onclick="deleteAccount(${acc.id})">删除</button></div>`;
-        });
-        container.innerHTML = html;
-    }
-
-    setInterval(updateCodes, 1000);
-
-    async function updateCodes() {
-        if (localAccounts.length === 0) return;
-        const epoch = Math.round(new Date().getTime() / 1000);
-        const remainTime = 30 - (epoch % 30);
-        document.getElementById('progressBar').style.width = ((remainTime / 30) * 100) + '%';
-
-        for (let acc of localAccounts) {
-            const codeEl = document.getElementById(`code-${acc.id}`);
-            if (codeEl) {
-                let code = await Base32TOTP.getOTP(acc.secret);
-                codeEl.innerText = code;
-            }
-        }
-    }
-
-    function showMsg(id, text, isError) {
-        const el = document.getElementById(id);
-        el.className = isError ? "error" : "success"; el.innerText = text;
-    }
-
-    function escapeHtml(text) {
-        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-</script>
-
-
-
-</body></html>
+        // 每秒刷新一次
+        setInterval(generateTOTP, 1000);
+        document.getElementById('secret').addEventListener('input', generateTOTP);
+    </script>
+</body>
+</html>
